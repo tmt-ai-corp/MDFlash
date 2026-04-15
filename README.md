@@ -26,6 +26,7 @@ bash run_benchmark.sh
 ```
 
 This produces benchmark outputs in `runs/` and logs in `logs/`.
+The benchmark runner compares autoregressive decoding, DFlash, MDFlash, and DDTree in the same sweep.
 
 ## Reproduce Paper Artifacts
 

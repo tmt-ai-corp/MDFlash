@@ -91,6 +91,17 @@ def collect_plot_data(runs_dir: Path) -> list[dict]:
             ddtree_speedups[tb] = baseline_tpt / mean_time_per_token(sdpa, k)
             ddtree_acceptances[tb] = mean_acceptance_length(sdpa, k)
 
+        mdflash_keys = sorted(
+            [k for k in sdpa["responses"][0] if k.startswith("mdflash_tb")],
+            key=lambda k: int(k.removeprefix("mdflash_tb")),
+        )
+        mdflash_speedups = {}
+        mdflash_acceptances = {}
+        for k in mdflash_keys:
+            tb = int(k.removeprefix("mdflash_tb"))
+            mdflash_speedups[tb] = baseline_tpt / mean_time_per_token(sdpa, k)
+            mdflash_acceptances[tb] = mean_acceptance_length(sdpa, k)
+
         args = sdpa["args"]
         results.append({
             "dataset": args["dataset"],
@@ -100,6 +111,8 @@ def collect_plot_data(runs_dir: Path) -> list[dict]:
             "dflash_acceptance": dflash_acceptance,
             "ddtree_speedups": ddtree_speedups,
             "ddtree_acceptances": ddtree_acceptances,
+            "mdflash_speedups": mdflash_speedups,
+            "mdflash_acceptances": mdflash_acceptances,
         })
     return results
 
@@ -133,6 +146,11 @@ MODEL_COLORS_DDTREE = {
     "Qwen3-4B":                      "#A1D99B",  # light green
     "Qwen3-8B":                      "#66BD63",  # medium green
     "Qwen3-Coder-30B-A3B-Instruct":  "#238443",  # dark green
+}
+MODEL_COLORS_MDFLASH = {
+    "Qwen3-4B":                      "#FDD0A2",  # light orange
+    "Qwen3-8B":                      "#FDAE6B",  # medium orange
+    "Qwen3-Coder-30B-A3B-Instruct":  "#E6550D",  # dark orange
 }
 
 
@@ -213,32 +231,52 @@ def plot_case_study(
         "legend.fontsize": 18.5,
     })
 
-    tree_budgets = sorted(r["ddtree_speedups"])
-    speedups = [r["ddtree_speedups"][tb] for tb in tree_budgets]
-    acceptances = [r["ddtree_acceptances"][tb] for tb in tree_budgets]
+    tree_budgets = sorted(set(r["ddtree_speedups"]) | set(r["mdflash_speedups"]))
+    if not tree_budgets:
+        raise ValueError("No DDTree or MDFlash budget sweep is available for the selected run.")
 
-    speed_color = "#0072B2"
-    accept_color = "#D55E00"
+    ddtree_speed_color = "#0072B2"
+    mdflash_speed_color = "#009E73"
+    ddtree_accept_color = "#D55E00"
+    mdflash_accept_color = "#CC79A7"
     baseline_color = "#6F6F6F"
 
     fig, ax_speed = plt.subplots(figsize=(8.2, 6.2))
     ax_accept = ax_speed.twinx()
 
-    speed_curve = ax_speed.plot(
-        tree_budgets,
-        speedups,
-        color=speed_color,
-        marker="o",
-        markersize=5.0,
-        linewidth=3.2,
-        markeredgecolor="white",
-        markeredgewidth=0.8,
-        zorder=4,
-        label="DDTree Speedup",
-    )[0]
+    speed_handles = []
+    if r["ddtree_speedups"]:
+        ddtree_budgets = sorted(r["ddtree_speedups"])
+        speed_handles.append(ax_speed.plot(
+            ddtree_budgets,
+            [r["ddtree_speedups"][tb] for tb in ddtree_budgets],
+            color=ddtree_speed_color,
+            marker="o",
+            markersize=5.0,
+            linewidth=3.2,
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=4,
+            label="DDTree Speedup",
+        )[0])
+    if r["mdflash_speedups"]:
+        mdflash_budgets = sorted(r["mdflash_speedups"])
+        speed_handles.append(ax_speed.plot(
+            mdflash_budgets,
+            [r["mdflash_speedups"][tb] for tb in mdflash_budgets],
+            color=mdflash_speed_color,
+            marker="D",
+            markersize=4.8,
+            linewidth=2.8,
+            linestyle=(0, (5, 2)),
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=4,
+            label="MDFlash Speedup",
+        )[0])
     speed_base = ax_speed.axhline(
         r["dflash_speedup"],
-        color=speed_color,
+        color=baseline_color,
         linestyle=(0, (4, 2)),
         linewidth=2.4,
         alpha=0.95,
@@ -246,21 +284,39 @@ def plot_case_study(
         label="DFlash Speedup",
     )
 
-    accept_curve = ax_accept.plot(
-        tree_budgets,
-        acceptances,
-        color=accept_color,
-        marker="s",
-        markersize=4.8,
-        linewidth=3.2,
-        markeredgecolor="white",
-        markeredgewidth=0.8,
-        zorder=5,
-        label="DDTree Acc. Length",
-    )[0]
+    accept_handles = []
+    if r["ddtree_acceptances"]:
+        ddtree_budgets = sorted(r["ddtree_acceptances"])
+        accept_handles.append(ax_accept.plot(
+            ddtree_budgets,
+            [r["ddtree_acceptances"][tb] for tb in ddtree_budgets],
+            color=ddtree_accept_color,
+            marker="s",
+            markersize=4.8,
+            linewidth=3.2,
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=5,
+            label="DDTree Acc. Length",
+        )[0])
+    if r["mdflash_acceptances"]:
+        mdflash_budgets = sorted(r["mdflash_acceptances"])
+        accept_handles.append(ax_accept.plot(
+            mdflash_budgets,
+            [r["mdflash_acceptances"][tb] for tb in mdflash_budgets],
+            color=mdflash_accept_color,
+            marker="^",
+            markersize=4.8,
+            linewidth=2.8,
+            linestyle=(0, (5, 2)),
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            zorder=5,
+            label="MDFlash Acc. Length",
+        )[0])
     accept_base = ax_accept.axhline(
         r["dflash_acceptance"],
-        color=accept_color,
+        color=baseline_color,
         linestyle=(0, (4, 2)),
         linewidth=2.4,
         alpha=0.95,
@@ -272,33 +328,39 @@ def plot_case_study(
     ax_speed.set_xscale("log", base=2)
     ax_speed.set_xticks(tree_budgets, [str(tb) for tb in tree_budgets])
     ax_speed.set_xlabel("Node Budget")
-    ax_speed.set_ylabel("Speedup", color=speed_color)
-    ax_accept.set_ylabel(tau_label, color=accept_color)
+    ax_speed.set_ylabel("Speedup", color=ddtree_speed_color)
+    ax_accept.set_ylabel(tau_label, color=ddtree_accept_color)
 
     ax_speed.grid(axis="y", color="#E6E6E6", linewidth=0.6, zorder=0)
     ax_speed.set_axisbelow(True)
     ax_speed.axhline(y=1.0, color=baseline_color, linestyle=":", linewidth=0.9, alpha=0.8, zorder=1)
     ax_speed.set_xlim(tree_budgets[0] * 0.88, tree_budgets[-1] * 1.14)
-    speed_bottom = 4.0
-    accept_bottom = 4.0
-    speed_top = max(speedups) * 1.12
-    accept_top = max(acceptances) * 1.08
+    all_speed_values = [r["dflash_speedup"]]
+    all_speed_values.extend(r["ddtree_speedups"].values())
+    all_speed_values.extend(r["mdflash_speedups"].values())
+    all_accept_values = [r["dflash_acceptance"]]
+    all_accept_values.extend(r["ddtree_acceptances"].values())
+    all_accept_values.extend(r["mdflash_acceptances"].values())
+    speed_bottom = max(1.0, min(all_speed_values) * 0.92)
+    accept_bottom = max(1.0, min(all_accept_values) * 0.92)
+    speed_top = max(all_speed_values) * 1.12
+    accept_top = max(all_accept_values) * 1.08
     common_top = max(speed_top, accept_top)
     ax_speed.set_ylim(speed_bottom, common_top)
     ax_accept.set_ylim(accept_bottom, common_top)
-    ax_speed.set_yticks(np.arange(speed_bottom, common_top + 1e-6, 1.0))
-    ax_accept.set_yticks(np.arange(accept_bottom, common_top + 1e-6, 1.0))
-    ax_speed.tick_params(axis="y", colors=speed_color)
-    ax_accept.tick_params(axis="y", colors=accept_color)
+    ax_speed.set_yticks(np.arange(np.floor(speed_bottom), common_top + 1e-6, 1.0))
+    ax_accept.set_yticks(np.arange(np.floor(accept_bottom), common_top + 1e-6, 1.0))
+    ax_speed.tick_params(axis="y", colors=ddtree_speed_color)
+    ax_accept.tick_params(axis="y", colors=ddtree_accept_color)
     ax_speed.tick_params(axis="x", colors="#555555")
 
     ax_speed.spines["top"].set_visible(False)
     ax_accept.spines["top"].set_visible(False)
-    ax_speed.spines["left"].set_color(speed_color)
-    ax_accept.spines["right"].set_color(accept_color)
+    ax_speed.spines["left"].set_color(ddtree_speed_color)
+    ax_accept.spines["right"].set_color(ddtree_accept_color)
     ax_speed.spines["bottom"].set_color("#CCCCCC")
 
-    legend_handles = [speed_curve, speed_base, accept_curve, accept_base]
+    legend_handles = speed_handles + [speed_base] + accept_handles + [accept_base]
     legend_labels = [handle.get_label() for handle in legend_handles]
     fig.legend(
         legend_handles,
@@ -306,7 +368,7 @@ def plot_case_study(
         loc="upper center",
         bbox_to_anchor=(0.5, 0.98),
         frameon=False,
-        ncol=2,
+        ncol=3,
         columnspacing=1.6,
         handlelength=2.8,
     )
@@ -324,7 +386,7 @@ def plot_acceptance_distribution(
     model: str,
     temperature: float,
 ) -> None:
-    """Acceptance-length histogram for DFlash vs best-speedup DDTree budget."""
+    """Acceptance-length histogram for DFlash vs best-speedup DDTree and MDFlash budgets."""
     sdpa, flash = find_run_pair(runs_dir, dataset, model, temperature)
     best_baseline = best_run_data(sdpa, flash, "baseline")
     baseline_tpt = mean_time_per_token(best_baseline, "baseline")
@@ -338,6 +400,18 @@ def plot_acceptance_distribution(
         key=lambda key: baseline_tpt / mean_time_per_token(sdpa, key),
     )
     best_budget = int(best_ddtree_key.removeprefix("ddtree_tb"))
+    mdflash_keys = sorted(
+        [k for k in sdpa["responses"][0] if k.startswith("mdflash_tb")],
+        key=lambda k: int(k.removeprefix("mdflash_tb")),
+    )
+    best_mdflash_key = None
+    best_mdflash_budget = None
+    if mdflash_keys:
+        best_mdflash_key = max(
+            mdflash_keys,
+            key=lambda key: baseline_tpt / mean_time_per_token(sdpa, key),
+        )
+        best_mdflash_budget = int(best_mdflash_key.removeprefix("mdflash_tb"))
 
     _setup_latex_rcparams()
     plt.rcParams.update({
@@ -349,18 +423,23 @@ def plot_acceptance_distribution(
 
     dflash_lengths = flatten_acceptance_lengths(best_dflash, "dflash")
     ddtree_lengths = flatten_acceptance_lengths(sdpa, best_ddtree_key)
+    mdflash_lengths = flatten_acceptance_lengths(sdpa, best_mdflash_key) if best_mdflash_key is not None else []
 
-    max_accept_len = max(max(dflash_lengths), max(ddtree_lengths))
+    max_accept_len = max([max(dflash_lengths), max(ddtree_lengths), max(mdflash_lengths) if mdflash_lengths else 0])
     x_values = np.arange(1, max_accept_len + 1)
     dflash_counts = np.bincount(dflash_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
     ddtree_counts = np.bincount(ddtree_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
     dflash_dist = dflash_counts / dflash_counts.sum()
     ddtree_dist = ddtree_counts / ddtree_counts.sum()
+    mdflash_dist = None
+    if mdflash_lengths:
+        mdflash_counts = np.bincount(mdflash_lengths, minlength=max_accept_len + 1)[1:max_accept_len + 1]
+        mdflash_dist = mdflash_counts / mdflash_counts.sum()
 
     fig, ax = plt.subplots(figsize=(8.2, 6.2))
-    width = 0.38
+    width = 0.26 if mdflash_dist is not None else 0.38
     ax.bar(
-        x_values - width / 2,
+        x_values - width if mdflash_dist is not None else x_values - width / 2,
         dflash_dist,
         width=width,
         color="#4E79A7",
@@ -370,25 +449,37 @@ def plot_acceptance_distribution(
         zorder=3,
     )
     ax.bar(
-        x_values + width / 2,
+        x_values if mdflash_dist is not None else x_values + width / 2,
         ddtree_dist,
         width=width,
         color="#59A14F",
         edgecolor="white",
         linewidth=0.7,
-        label=f"DFlash+DDTree (B={best_budget})",
+        label=f"DDTree (B={best_budget})",
         zorder=3,
     )
+    if mdflash_dist is not None and best_mdflash_budget is not None:
+        ax.bar(
+            x_values + width,
+            mdflash_dist,
+            width=width,
+            color="#F28E2B",
+            edgecolor="white",
+            linewidth=0.7,
+            label=f"MDFlash (B={best_mdflash_budget})",
+            zorder=3,
+        )
 
     ax.set_xlabel("Acceptance Length")
     ax.set_ylabel("Fraction of Decoding Rounds")
     ax.set_xticks(x_values)
     ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda val, _: f"{100 * val:.0f}%"))
     ax.set_xlim(0.4, max_accept_len + 0.6)
-    ax.set_ylim(0.0, max(dflash_dist.max(), ddtree_dist.max()) * 1.12)
+    ymax = max(dflash_dist.max(), ddtree_dist.max(), mdflash_dist.max() if mdflash_dist is not None else 0.0)
+    ax.set_ylim(0.0, ymax * 1.12)
     ax.set_axisbelow(True)
     ax.grid(axis="y", color="#E6E6E6", linewidth=0.6, zorder=0)
-    fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.98), frameon=False, ncol=2)
+    fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.98), frameon=False, ncol=3 if mdflash_dist is not None else 2)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["left"].set_color("#CCCCCC")
@@ -421,13 +512,15 @@ def plot_bar_speeds(results: list[dict], output: Path) -> None:
         "ytick.labelsize": 8.5,
     })
 
-    # Aggregate: for each (dataset, model) at T=0.0, take the best DDTree budget.
+    # Aggregate: for each (dataset, model) at T=0.0, take the best budget for each method family.
     agg: dict[tuple[str, str], dict[str, float]] = {}
     for r in results:
         key = (r["dataset"], r["model"])
         if key not in agg:
-            agg[key] = {"dflash": 0.0, "ddtree": 0.0}
+            agg[key] = {"dflash": 0.0, "mdflash": 0.0, "ddtree": 0.0}
         agg[key]["dflash"] = max(agg[key]["dflash"], r["dflash_speedup"])
+        best_mdflash = max(r["mdflash_speedups"].values()) if r["mdflash_speedups"] else 0.0
+        agg[key]["mdflash"] = max(agg[key]["mdflash"], best_mdflash)
         best_ddtree = max(r["ddtree_speedups"].values()) if r["ddtree_speedups"] else 0.0
         agg[key]["ddtree"] = max(agg[key]["ddtree"], best_ddtree)
 
@@ -447,78 +540,71 @@ def plot_bar_speeds(results: list[dict], output: Path) -> None:
     datasets = sorted(all_datasets, key=lambda d: DATASET_ORDER.get(d, 100))
     n_datasets = len(datasets)
 
-    # Bar geometry: all DFlash bars on the left, all DDTree bars on the right,
-    # with a small gap between the two halves.
-    # Layout per group: [DF_0, DF_1, DF_2, <gap>, DDT_0, DDT_1, DDT_2]
-    gap_units = 0.5          # gap expressed as multiples of bar_width
-    total_units = n_models * 2 + gap_units
+    # Layout per group: DFlash band, MDFlash band, DDTree band.
+    method_specs = [
+        ("dflash", MODEL_COLORS_DFLASH, "DFlash"),
+        ("mdflash", MODEL_COLORS_MDFLASH, "MDFlash"),
+        ("ddtree", MODEL_COLORS_DDTREE, "DDTree"),
+    ]
+    n_methods = len(method_specs)
+    gap_units = 0.5          # gap between method bands, in units of bar_width
+    total_units = n_models * n_methods + gap_units * (n_methods - 1)
     bar_width = 0.78 / total_units
     gap = gap_units * bar_width
     x = np.arange(n_datasets)
 
     # Pre-collect vals for value-label pass
-    all_ddtree: dict[tuple[int, int], float] = {}  # (model_idx, dataset_idx) -> val
+    all_method_values: dict[tuple[int, int, int], float] = {}  # (method_idx, model_idx, dataset_idx) -> val
 
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
 
-    # Two separate passes so legend order is: all DFlash entries, then all DDTree entries
-    for i, model in enumerate(models):
-        dflash_vals = []
-        for dataset in datasets:
-            dflash_vals.append(agg.get((dataset, model), {"dflash": 0.0})["dflash"])
-        color = MODEL_COLORS_DFLASH.get(model, "#AAAAAA")
-        display_name = MODEL_DISPLAY_NAMES.get(model, model)
-        # DFlash slot i → left half
-        df_offset = (i - (n_models - 1) / 2 - (n_models + gap_units) / 2 + 0.5) * bar_width
-        ax.bar(
-            x + df_offset, dflash_vals, bar_width,
-            label=f"{display_name} DFlash",
-            color=color, edgecolor=color, linewidth=0.4, zorder=3,
-        )
+    band_width = n_models * bar_width + gap
+    for method_idx, (method_key, color_map, method_label) in enumerate(method_specs):
+        band_center = (method_idx - (n_methods - 1) / 2) * band_width
+        for model_idx, model in enumerate(models):
+            vals = []
+            for dataset_idx, dataset in enumerate(datasets):
+                val = agg.get((dataset, model), {method_key: 0.0})[method_key]
+                vals.append(val)
+                all_method_values[(method_idx, model_idx, dataset_idx)] = val
+            color = color_map.get(model, "#777777")
+            display_name = MODEL_DISPLAY_NAMES.get(model, model)
+            model_offset = (model_idx - (n_models - 1) / 2) * bar_width
+            ax.bar(
+                x + band_center + model_offset,
+                vals,
+                bar_width,
+                label=f"{display_name} {method_label}",
+                color=color,
+                edgecolor=color,
+                linewidth=0.4,
+                zorder=3,
+            )
 
-    for i, model in enumerate(models):
-        ddtree_vals = []
-        for j, dataset in enumerate(datasets):
-            val = agg.get((dataset, model), {"ddtree": 0.0})["ddtree"]
-            ddtree_vals.append(val)
-            all_ddtree[(i, j)] = val
-        color = MODEL_COLORS_DDTREE.get(model, "#555555")
-        display_name = MODEL_DISPLAY_NAMES.get(model, model)
-        # DDTree slot i → right half (shifted by n_models + gap)
-        ddt_offset = (i - (n_models - 1) / 2 + (n_models + gap_units) / 2 + 0.5) * bar_width
-        ax.bar(
-            x + ddt_offset, ddtree_vals, bar_width,
-            label=f"{display_name} DFlash+DDTree",
-            color=color, edgecolor=color, linewidth=0.4, zorder=3,
-        )
-
-    # Handles from loop: [4B-DF, 8B-DF, 30B-DF, 4B-DDT, 8B-DDT, 30B-DDT]
-    # ncol=3 fills column-first, so interleave to get Row1=all-DF, Row2=all-DDT:
-    # → [4B-DF, 4B-DDT, 8B-DF, 8B-DDT, 30B-DF, 30B-DDT]
     handles, labels = ax.get_legend_handles_labels()
-    interleaved_h, interleaved_l = [], []
-    for i in range(n_models):
-        interleaved_h += [handles[i], handles[n_models + i]]
-        interleaved_l += [labels[i], labels[n_models + i]]
     ax.legend(
-        interleaved_h, interleaved_l,
-        fontsize=7.4, ncol=3,
+        handles, labels,
+        fontsize=7.0, ncol=3,
         loc="lower right", bbox_to_anchor=(1.0, 1.0),
         frameon=True, framealpha=0.95, edgecolor="#DDDDDD",
         handletextpad=0.3, columnspacing=0.6, labelspacing=0.3,
     )
 
-    # Value labels: only the best DFlash+DDTree per dataset
+    # Value labels: only the best non-DFlash variant per dataset
     for j, dataset in enumerate(datasets):
         best_val = 0.0
+        best_method_idx = 1
         best_model_idx = 0
-        for i, model in enumerate(models):
-            val = all_ddtree.get((i, j), 0.0)
-            if val > best_val:
-                best_val = val
-                best_model_idx = i
-        ddt_offset = (best_model_idx - (n_models - 1) / 2 + (n_models + gap_units) / 2 + 0.5) * bar_width
-        bar_x = x[j] + ddt_offset
+        for method_idx in range(1, n_methods):
+            for model_idx, model in enumerate(models):
+                val = all_method_values.get((method_idx, model_idx, j), 0.0)
+                if val > best_val:
+                    best_val = val
+                    best_method_idx = method_idx
+                    best_model_idx = model_idx
+        band_center = (best_method_idx - (n_methods - 1) / 2) * band_width
+        model_offset = (best_model_idx - (n_models - 1) / 2) * bar_width
+        bar_x = x[j] + band_center + model_offset
         ax.text(
             bar_x, best_val + 0.08,
             _fmt_speedup(best_val, use_tex),
@@ -565,12 +651,12 @@ def main() -> None:
     parser.add_argument(
         "--case-study",
         action="store_true",
-        help="Generate a two-panel figure of speedup and acceptance length vs node budget",
+        help="Generate a single-panel figure comparing DDTree and MDFlash against DFlash",
     )
     parser.add_argument(
         "--acceptance-distribution",
         action="store_true",
-        help="Generate an acceptance-length histogram for DFlash vs the best DDTree budget",
+        help="Generate an acceptance-length histogram for DFlash vs the best DDTree and MDFlash budgets",
     )
     parser.add_argument("--dataset", default="math500",
                         help="Dataset to plot when --case-study is set")

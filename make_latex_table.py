@@ -61,8 +61,10 @@ def best_run_data(sdpa_run_data: dict[str, object], flash_run_data: dict[str, ob
 def method_label(method_key: str) -> str:
     if method_key == "dflash":
         return "DFlash"
+    if method_key.startswith("mdflash_tb"):
+        return f"MDFlash ({method_key.removeprefix('mdflash_tb')})"
     if method_key.startswith("ddtree_tb"):
-        return f"DFlash+DDTree ({method_key.removeprefix('ddtree_tb')})"
+        return f"DDTree ({method_key.removeprefix('ddtree_tb')})"
     return method_key
 
 
@@ -121,6 +123,16 @@ def build_rows(runs_dir: Path) -> list[tuple[str, str, str, str, float, float]]:
         dflash_acceptance = mean_acceptance_length(best_dflash_run_data, "dflash")
         rows.append((dataset, model_name, str(temperature), "DFlash", dflash_speedup, dflash_acceptance))
 
+        mdflash_method_keys = [method_key for method_key in sdpa_run_data["responses"][0] if method_key.startswith("mdflash_tb")]
+        if mdflash_method_keys:
+            best_mdflash_method_key = max(
+                mdflash_method_keys,
+                key=lambda method_key: best_baseline_time_per_token / mean_time_per_token(sdpa_run_data, method_key),
+            )
+            best_mdflash_speedup = best_baseline_time_per_token / mean_time_per_token(sdpa_run_data, best_mdflash_method_key)
+            best_mdflash_acceptance = mean_acceptance_length(sdpa_run_data, best_mdflash_method_key)
+            rows.append((dataset, model_name, str(temperature), "MDFlash", best_mdflash_speedup, best_mdflash_acceptance))
+
         ddtree_method_keys = [method_key for method_key in sdpa_run_data["responses"][0] if method_key.startswith("ddtree_tb")]
         best_ddtree_method_key = max(
             ddtree_method_keys,
@@ -133,7 +145,7 @@ def build_rows(runs_dir: Path) -> list[tuple[str, str, str, str, float, float]]:
                 dataset,
                 model_name,
                 str(temperature),
-                "DFlash+DDTree",
+                "DDTree",
                 best_ddtree_speedup,
                 best_ddtree_acceptance,
             )
@@ -153,7 +165,8 @@ def make_latex_table(rows: list[tuple[str, str, str, str, float, float]]) -> str
     datasets = sorted(set(r[0] for r in rows), key=lambda d: DATASET_ORDER.get(d, 100))
     models = sorted(set(r[1] for r in rows))
     temperatures = sorted(set(r[2] for r in rows))
-    methods = sorted(set(r[3] for r in rows), key=lambda method: (method != "DFlash", method))
+    method_order = {"DFlash": 0, "MDFlash": 1, "DDTree": 2}
+    methods = sorted(set(r[3] for r in rows), key=lambda method: (method_order.get(method, 100), method))
 
     # lookup: (temp, dataset, model, method) -> (speedup, acceptance)
     lookup: dict[tuple[str, str, str, str], tuple[float, float]] = {}

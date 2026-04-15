@@ -13,6 +13,7 @@ import distributed as dist
 from model import DFlashDraftModel, load_and_process_dataset
 from dflash import dflash_generate
 from ddtree import ddtree_generate, maybe_enable_cpp_compact
+from mdflash import mdflash_generate
 
 
 def main() -> None:
@@ -21,6 +22,8 @@ def main() -> None:
     parser.add_argument("--draft-name-or-path", type=str, required=True)
     parser.add_argument("--block-size", type=int, default=None)
     parser.add_argument("--tree-budget", type=str, default="16,32,64,128,256,512,1024")
+    parser.add_argument("--mdflash-budget", type=str, default=None)
+    parser.add_argument("--mdflash-proposal-temperature", type=float, default=1.0)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=16384)
@@ -57,7 +60,7 @@ def main() -> None:
     draft_attn_implementation = "flash_attention_2"
 
     if not args.flash_attn and installed_flash_attn:
-        logger.warning("DDTree uses a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
+        logger.warning("DDTree and MDFlash use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
 
     target = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -73,11 +76,15 @@ def main() -> None:
 
     block_size = args.block_size if args.block_size is not None else draft_model.block_size
     tree_budgets = [int(tree_budget) for tree_budget in args.tree_budget.split(",")]
+    mdflash_budgets = tree_budgets if args.mdflash_budget is None else [int(tree_budget) for tree_budget in args.mdflash_budget.split(",")]
     methods_to_run = ["dflash"]
     method_key_to_tree_budget = {}
     if not args.flash_attn:
+        mdflash_method_keys = [f"mdflash_tb{tree_budget}" for tree_budget in mdflash_budgets]
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
+        methods_to_run.extend(mdflash_method_keys)
         methods_to_run.extend(ddtree_method_keys)
+        method_key_to_tree_budget.update({f"mdflash_tb{tree_budget}": tree_budget for tree_budget in mdflash_budgets})
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
 
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path)
@@ -118,7 +125,11 @@ def main() -> None:
                 temperature=args.temperature,
             )
         else:
-            _ = ddtree_generate(
+            generate_fn = mdflash_generate if method_key.startswith("mdflash_tb") else ddtree_generate
+            generation_kwargs = {}
+            if method_key.startswith("mdflash_tb"):
+                generation_kwargs["proposal_temperature"] = args.mdflash_proposal_temperature
+            _ = generate_fn(
                 model=draft_model,
                 target=target,
                 input_ids=warmup_input_ids,
@@ -128,6 +139,7 @@ def main() -> None:
                 tree_budget=method_key_to_tree_budget[method_key],
                 stop_token_ids=[tokenizer.eos_token_id],
                 temperature=args.temperature,
+                **generation_kwargs,
             )
 
     responses = []
@@ -169,7 +181,11 @@ def main() -> None:
                         temperature=args.temperature,
                     )
                 else:
-                    response[method_key] = ddtree_generate(
+                    generate_fn = mdflash_generate if method_key.startswith("mdflash_tb") else ddtree_generate
+                    generation_kwargs = {}
+                    if method_key.startswith("mdflash_tb"):
+                        generation_kwargs["proposal_temperature"] = args.mdflash_proposal_temperature
+                    response[method_key] = generate_fn(
                         model=draft_model,
                         target=target,
                         input_ids=input_ids,
@@ -179,6 +195,7 @@ def main() -> None:
                         tree_budget=method_key_to_tree_budget[method_key],
                         stop_token_ids=[tokenizer.eos_token_id],
                         temperature=args.temperature,
+                        **generation_kwargs,
                     )
 
             spec_response = response[methods_to_run[-1]]

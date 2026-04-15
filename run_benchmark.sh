@@ -37,6 +37,7 @@ TEMPERATURES=(
 
 COMMON_BENCHMARK_ARGS=(
   --max-new-tokens 2048
+  --mdflash-proposal-temperature 1.0
 )
 
 slugify() {

@@ -226,15 +226,9 @@ def build_merged_prefix_pflash_tree(
 
     def should_promote_representative(
         entry: SimpleNamespace,
-        branch_idx: int,
         logw: float,
         state_id: int,
     ) -> bool:
-        representative_branch_idx = entry.representative_branch_idx
-        if branch_idx == 0 and representative_branch_idx != 0:
-            return True
-        if branch_idx != 0 and representative_branch_idx == 0:
-            return False
         if logw > entry.representative_logw:
             return True
         if logw < entry.representative_logw:
@@ -259,7 +253,6 @@ def build_merged_prefix_pflash_tree(
                 pending_state_ids=[state_id],
                 in_tree=False,
                 representative_state_id=state_id,
-                representative_branch_idx=branch_idx,
                 representative_logw=logw,
                 version=0,
             )
@@ -269,9 +262,8 @@ def build_merged_prefix_pflash_tree(
             if entry.in_tree:
                 return
             entry.pending_state_ids.append(state_id)
-            if should_promote_representative(entry, branch_idx, logw, state_id):
+            if should_promote_representative(entry, logw, state_id):
                 entry.representative_state_id = state_id
-                entry.representative_branch_idx = branch_idx
                 entry.representative_logw = logw
             entry.version += 1
 

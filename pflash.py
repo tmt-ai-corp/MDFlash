@@ -20,9 +20,30 @@ from pexpress import build_perturbed_noise_embedding_batch
 PFLASH_STAGE_ORDER = ("draft", "tree_build", "tree_compile", "verify", "commit")
 
 
+def build_branch_log_priors(
+    num_branches: int,
+    perturbation_temperature: float,
+    branch_prior_weight: float,
+    device: torch.device,
+) -> torch.Tensor:
+    if num_branches <= 0:
+        raise ValueError("num_branches must be positive.")
+    if perturbation_temperature < 0.0:
+        raise ValueError("perturbation_temperature must be non-negative.")
+    if branch_prior_weight < 0.0:
+        raise ValueError("branch_prior_weight must be non-negative.")
+
+    if num_branches == 1 or perturbation_temperature < 1e-5 or branch_prior_weight < 1e-5:
+        return torch.zeros((num_branches,), device=device, dtype=torch.float32)
+
+    branch_positions = torch.linspace(0.0, 1.0, steps=num_branches, device=device, dtype=torch.float32)
+    return -(branch_prior_weight * branch_positions.square())
+
+
 def build_pflash_tree(
     draft_logits: torch.Tensor,
     budget: int,
+    branch_log_priors: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, list[int], list[dict[int, int]], torch.Tensor, dict[str, float]]:
     build_subtimes = empty_stage_times(DDTREE_TREE_BUILD_STAGE_ORDER)
 
@@ -47,15 +68,20 @@ def build_pflash_tree(
     log_z = torch.logsumexp(logits, dim=-1, keepdim=True)
     top_log_probs_cpu = (top_logits - log_z).to(device="cpu", dtype=torch.float32)
     top_token_ids_cpu = top_token_ids.to(device="cpu", dtype=torch.long)
+    if branch_log_priors is None:
+        branch_log_priors_cpu = torch.zeros((num_branches,), dtype=torch.float32)
+    else:
+        branch_log_priors_cpu = branch_log_priors.to(device="cpu", dtype=torch.float32)
     build_subtimes["tree_build_copy"] = cuda_time() - copy_start
 
     top_log_probs_np = top_log_probs_cpu.numpy()
     top_token_ids_np = top_token_ids_cpu.numpy()
+    branch_log_priors_np = branch_log_priors_cpu.numpy()
 
     heap_start = time.perf_counter()
     heap: list[tuple[float, int, tuple[int, ...], int, int, float]] = []
     for branch_idx in range(num_branches):
-        first_logw = float(top_log_probs_np[branch_idx, 0, 0])
+        first_logw = float(branch_log_priors_np[branch_idx] + top_log_probs_np[branch_idx, 0, 0])
         heapq.heappush(heap, (-first_logw, branch_idx, (0,), 1, 0, first_logw))
 
     parents = [-1]
@@ -141,6 +167,7 @@ def pflash_generate(
     tree_budget: int | None = None,
     perturbation_temperature: float = 0.75,
     position_temperature_decay: float = 0.0,
+    branch_prior_weight: float = 0.5,
     save_tree_traces: bool = False,
 ) -> SimpleNamespace:
     if block_size <= 1:
@@ -224,6 +251,12 @@ def pflash_generate(
         )
         projected_target_hidden = model.project_target_hidden(target_hidden)
         batched_target_hidden = projected_target_hidden.expand(num_branches, -1, -1)
+        branch_log_priors = build_branch_log_priors(
+            num_branches=num_branches,
+            perturbation_temperature=perturbation_temperature,
+            branch_prior_weight=branch_prior_weight,
+            device=model.device,
+        )
         draft_position_ids = position_ids[
             :,
             past_key_values_draft.get_seq_length() : start + block_size,
@@ -249,6 +282,7 @@ def pflash_generate(
         node_token_ids, node_depths, parents, child_maps, visibility_cpu, tree_build_subtimes = build_pflash_tree(
             draft_logits=draft_logits,
             budget=tree_budget,
+            branch_log_priors=branch_log_priors,
         )
         stage_times["tree_build"] += cuda_time() - tree_build_start
         for stage_name, stage_elapsed in tree_build_subtimes.items():

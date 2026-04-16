@@ -30,6 +30,7 @@ def main() -> None:
     parser.add_argument("--pflash-budget", type=str, default=None)
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
     parser.add_argument("--pexpress-position-temperature-decay", type=float, default=0.0)
+    parser.add_argument("--pflash-branch-prior-weight", type=float, default=0.5)
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=16384)
@@ -147,6 +148,7 @@ def main() -> None:
                 **common_kwargs,
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
+                branch_prior_weight=args.pflash_branch_prior_weight,
             )
         if method_key.startswith("ddtree_tb"):
             return ddtree_generate(**common_kwargs)

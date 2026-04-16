@@ -151,7 +151,7 @@ def pexpress_generate(
     while start < max_length:
         block_output_ids = output_ids[:, start : start + block_size].clone()
         root_token = block_output_ids[:, :1]
-        num_branches = max(tree_budget, 1)
+        num_branches = max(tree_budget // block_size, 1)
 
         draft_stage_start = cuda_time()
         base_noise_embedding = target.model.embed_tokens(block_output_ids)

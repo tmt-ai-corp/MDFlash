@@ -102,6 +102,7 @@ def exp_ddtree_generate(
 
     past_key_values_target = DynamicCache()
     past_key_values_draft = DynamicCache()
+    past_key_values_alignment = DynamicCache()
     stage_times = empty_stage_times(EXP_DDTREE_STAGE_ORDER + DDTREE_TREE_BUILD_STAGE_ORDER)
 
     prefill_start = cuda_time()
@@ -138,6 +139,22 @@ def exp_ddtree_generate(
 
         draft_stage_start = cuda_time()
         base_noise_embedding = target.model.embed_tokens(block_output_ids)
+        base_draft_position_ids = position_ids[
+            :,
+            past_key_values_draft.get_seq_length() : start + block_size,
+        ]
+        draft_logits = target.lm_head(model(
+            target_hidden=target_hidden,
+            noise_embedding=base_noise_embedding,
+            position_ids=base_draft_position_ids,
+            past_key_values=past_key_values_draft,
+            use_cache=True,
+            is_causal=False,
+        )[:, -draft_horizon:, :])
+        past_key_values_draft.crop(start)
+
+        # Keep the DDTree path bitwise-aligned with vanilla DDTree and use a
+        # separate batched pass only for alignment analysis.
         noise_embedding_batch = build_perturbed_noise_embedding_batch(
             base_noise_embedding=base_noise_embedding,
             num_branches=EXP_DDTREE_BATCH_SIZE,
@@ -146,20 +163,20 @@ def exp_ddtree_generate(
         )
         projected_target_hidden = model.project_target_hidden(target_hidden)
         batched_target_hidden = projected_target_hidden.expand(EXP_DDTREE_BATCH_SIZE, -1, -1)
-        draft_position_ids = position_ids[
+        alignment_position_ids = position_ids[
             :,
-            past_key_values_draft.get_seq_length() : start + block_size,
+            past_key_values_alignment.get_seq_length() : start + block_size,
         ].expand(EXP_DDTREE_BATCH_SIZE, -1)
-        draft_logits = target.lm_head(model(
+        alignment_draft_logits = target.lm_head(model(
             target_hidden=batched_target_hidden,
             target_hidden_is_projected=True,
             noise_embedding=noise_embedding_batch,
-            position_ids=draft_position_ids,
-            past_key_values=past_key_values_draft,
+            position_ids=alignment_position_ids,
+            past_key_values=past_key_values_alignment,
             use_cache=True,
             is_causal=False,
         )[:, -draft_horizon:, :])
-        past_key_values_draft.crop(start)
+        past_key_values_alignment.crop(start)
         draft_stage_elapsed = cuda_time() - draft_stage_start
         if draft_prefill:
             draft_prefill = False
@@ -218,7 +235,7 @@ def exp_ddtree_generate(
         compact_dynamic_cache(past_key_values_target, start, accepted_indices)
         target_hidden = extract_context_feature(output.hidden_states, model.target_layer_ids).index_select(1, accepted_index_tensor)
 
-        agreement_snapshot = build_batch_agreement_snapshot(draft_logits)
+        agreement_snapshot = build_batch_agreement_snapshot(alignment_draft_logits)
         if agreement_snapshot is not None:
             accepted_draft_tokens = max(0, min(len(accepted_indices) - 1, agreement_snapshot["depth_count"]))
             agreement_snapshot["acceptance_length"] = int(len(accepted_indices))

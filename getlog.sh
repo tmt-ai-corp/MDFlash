@@ -107,7 +107,7 @@ def print_pair_sanity_checks(data):
     checked_pairs = []
 
     for method in sorted(methods):
-        for prefix in ("pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb", "pflash_v5_tb", "pflash_v6_tb"):
+        for prefix in ("exp_ddtree_tb", "pflash_v2_tb", "pflash_v3_tb", "pflash_v4_tb", "pflash_v5_tb", "pflash_v6_tb"):
             if not method.startswith(prefix):
                 continue
             budget = method.removeprefix(prefix)

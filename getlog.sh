@@ -16,7 +16,11 @@ from collections import Counter, defaultdict
 
 import torch
 
-from agreement_metrics import bucket_batch_agreement_metrics, summarize_batch_agreement_metrics
+from agreement_metrics import (
+    bucket_batch_agreement_metrics,
+    pearson_correlation,
+    summarize_batch_agreement_metrics,
+)
 
 
 def load_and_analyze(pt_path):
@@ -213,6 +217,84 @@ def summarize_adaptive_modes(metrics):
     return sorted(rows, key=lambda row: mode_order.get(row["mode"], 100))
 
 
+def summarize_exp_ddtree_metrics(metrics):
+    if not metrics:
+        return None
+
+    accepted = [float(metric.get("accepted_draft_tokens", 0.0)) for metric in metrics]
+    mean_alignment = [float(metric.get("mean_alignment", 0.0)) for metric in metrics]
+    max_depth = [float(metric.get("tree_max_depth", 0.0)) for metric in metrics]
+    max_width = [float(metric.get("tree_max_width", 0.0)) for metric in metrics]
+
+    return {
+        "rounds": len(metrics),
+        "align_acc_pearson": pearson_correlation(mean_alignment, accepted),
+        "depth_acc_pearson": pearson_correlation(max_depth, accepted),
+        "width_acc_pearson": pearson_correlation(max_width, accepted),
+        "align_depth_pearson": pearson_correlation(mean_alignment, max_depth),
+        "align_width_pearson": pearson_correlation(mean_alignment, max_width),
+        "avg_alignment": sum(mean_alignment) / len(mean_alignment) if mean_alignment else None,
+        "avg_depth": sum(max_depth) / len(max_depth) if max_depth else None,
+        "avg_width": sum(max_width) / len(max_width) if max_width else None,
+        "avg_acc": sum(accepted) / len(accepted) if accepted else None,
+    }
+
+
+def print_exp_ddtree_summary(data):
+    rows = []
+    responses = data["responses"]
+    for method in data["methods"]:
+        collected_metrics = []
+        for response in responses:
+            result = response.get(method)
+            if result is None:
+                continue
+            collected_metrics.extend(getattr(result, "exp_ddtree_metrics", None) or [])
+        summary = summarize_exp_ddtree_metrics(collected_metrics)
+        if summary is not None:
+            rows.append((method, summary))
+
+    if not rows:
+        return
+
+    def fmt(value):
+        return "N/A" if value is None else f"{value:.3f}"
+
+    print("-" * 120)
+    print("Exp-DDTree shape vs alignment vs acceptance")
+    print(
+        "{:<20} | {:>7} | {:>9} | {:>9} | {:>9} | {:>9} | {:>9} | {:>8} | {:>8} | {:>8}".format(
+            "Method",
+            "Rounds",
+            "Aln-Acc",
+            "Dep-Acc",
+            "Wid-Acc",
+            "Aln-Dep",
+            "Aln-Wid",
+            "AvgAln",
+            "AvgDep",
+            "AvgAcc",
+        )
+    )
+    print("-" * 120)
+    for method, summary in rows:
+        print(
+            "{:<20} | {:>7} | {:>9} | {:>9} | {:>9} | {:>9} | {:>9} | {:>8} | {:>8} | {:>8}".format(
+                method,
+                summary["rounds"],
+                fmt(summary["align_acc_pearson"]),
+                fmt(summary["depth_acc_pearson"]),
+                fmt(summary["width_acc_pearson"]),
+                fmt(summary["align_depth_pearson"]),
+                fmt(summary["align_width_pearson"]),
+                fmt(summary["avg_alignment"]),
+                fmt(summary["avg_depth"]),
+                fmt(summary["avg_acc"]),
+            )
+        )
+    print("  Pearson r is computed round-wise over accepted draft tokens.")
+
+
 def print_batch_agreement_summary(data):
     rows = []
     bucket_rows = []
@@ -350,6 +432,7 @@ def print_single_result(data, filename):
         "pflash_v4_budget",
         "pflash_v5_budget",
         "pflash_v6_budget",
+        "exp_ddtree_budget",
         "pexpress_perturbation_temperature",
         "pexpress_position_temperature_decay",
         "pflash_branch_prior_weight",
@@ -395,6 +478,7 @@ def print_single_result(data, filename):
         ))
 
     print_batch_agreement_summary(data)
+    print_exp_ddtree_summary(data)
     print_pair_sanity_checks(data)
     print_sample_coverage(data)
     print()

@@ -16,6 +16,8 @@ from collections import defaultdict
 
 import torch
 
+from agreement_metrics import summarize_batch_agreement_metrics
+
 
 def load_and_analyze(pt_path):
     try:
@@ -140,6 +142,63 @@ def print_pair_sanity_checks(data):
         )
 
 
+def print_batch_agreement_summary(data):
+    rows = []
+    responses = data["responses"]
+    for method in data["methods"]:
+        collected_metrics = []
+        for response in responses:
+            result = response.get(method)
+            if result is None:
+                continue
+            collected_metrics.extend(getattr(result, "batch_agreement_metrics", None) or [])
+        if not collected_metrics:
+            continue
+        summary = summarize_batch_agreement_metrics(collected_metrics)
+        if summary["rounds"] == 0:
+            continue
+        rows.append((method, summary))
+
+    if not rows:
+        return
+
+    def fmt(value):
+        return "N/A" if value is None else f"{value:.3f}"
+
+    print("-" * 120)
+    print("Batch agreement vs actual acceptance")
+    print(
+        "{:<20} | {:>7} | {:>8} | {:>9} | {:>9} | {:>10} | {:>10} | {:>8} | {:>8}".format(
+            "Method",
+            "Rounds",
+            "Tokens",
+            "TokMaj r",
+            "TokBase r",
+            "RndFirst r",
+            "RndMean r",
+            "AvgMaj",
+            "AvgAcc",
+        )
+    )
+    print("-" * 120)
+    for method, summary in rows:
+        print(
+            "{:<20} | {:>7} | {:>8} | {:>9} | {:>9} | {:>10} | {:>10} | {:>8} | {:>8}".format(
+                method,
+                summary["rounds"],
+                summary["tokens"],
+                fmt(summary["token_majority_pearson"]),
+                fmt(summary["token_base_pearson"]),
+                fmt(summary["round_first_majority_pearson"]),
+                fmt(summary["round_mean_majority_pearson"]),
+                fmt(summary["avg_majority_agreement"]),
+                fmt(summary["avg_accepted_draft_tokens"]),
+            )
+        )
+    print("  Tok* r: token-level Pearson against per-depth accepted/not-accepted.")
+    print("  Rnd* r: round-level Pearson against accepted draft-token count.")
+
+
 def print_single_result(data, filename):
     methods = data["methods"]
     results = data["results"]
@@ -165,6 +224,7 @@ def print_single_result(data, filename):
         "pflash_v4_support_bonus_weight",
         "pflash_v4_base_gap_penalty",
         "pflash_v4_graft_score_threshold",
+        "measure_batch_agreement",
     ):
         print("  {}={}".format(name, args.get(name, "N/A")))
     print("-" * 120)
@@ -188,6 +248,7 @@ def print_single_result(data, filename):
             summary["avg_rounds"],
         ))
 
+    print_batch_agreement_summary(data)
     print_pair_sanity_checks(data)
     print()
 

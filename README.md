@@ -30,6 +30,8 @@ The benchmark runner compares autoregressive decoding, DFlash, MDFlash, P-Expres
 
 `run_benchmark.sh` also exposes `PEXPRESS_PERTURBATION_TEMPERATURE`, `PEXPRESS_POSITION_TEMPERATURE_DECAY`, `PFLASH_BRANCH_PRIOR_WEIGHT`, `PFLASH_MERGE_PREFIX_BRANCHES`, `PFLASH_PREFIX_SUPPORT_BONUS_WEIGHT`, and the `PFLASH_V4_*` knobs as environment-variable overrides for tuning the perturbation sweep. P-Express, P-Flash, P-Flash V2, P-Flash V3, and P-Flash V4 all reuse the perturbation settings, while P-Flash adds a branch-prior penalty and can optionally merge branch proposals into a shared-prefix trie with a configurable support bonus. P-Flash V4 keeps a DDTree backbone and spends only the tail of the budget on normalized perturbation grafts.
 
+Set `MEASURE_BATCH_AGREEMENT=1` or pass `--measure-batch-agreement` to store perturbation-batch agreement diagnostics and have `getlog.sh` report their correlation with actual acceptance.
+
 ## Reproduce Paper Artifacts
 
 Generate the plots:

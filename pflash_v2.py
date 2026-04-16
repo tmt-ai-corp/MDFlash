@@ -12,6 +12,7 @@ from ddtree import (
     compact_dynamic_cache,
 )
 from pexpress import build_perturbed_noise_embedding_batch
+from agreement_metrics import append_batch_agreement_metric
 
 
 PFLASH_V2_BATCH_SIZE = 4
@@ -169,6 +170,7 @@ def pflash_v2_generate(
     tree_budget: int | None = None,
     perturbation_temperature: float = 0.75,
     position_temperature_decay: float = 0.0,
+    measure_batch_agreement: bool = False,
     save_tree_traces: bool = False,
 ) -> SimpleNamespace:
     if block_size <= 1:
@@ -246,6 +248,7 @@ def pflash_v2_generate(
     acceptance_lengths = []
     round_timestamps = []
     round_trees = [] if save_tree_traces else None
+    batch_agreement_metrics = [] if measure_batch_agreement else None
     draft_prefill = True
     previous_tree_start = None
 
@@ -348,6 +351,7 @@ def pflash_v2_generate(
             posterior_logits=output.logits,
             temperature=temperature,
         )
+        append_batch_agreement_metric(batch_agreement_metrics, draft_logits, accepted_indices)
         accepted_index_tensor = torch.tensor(accepted_indices, dtype=torch.long, device=verify_input_ids.device)
         selected_verify_input_ids = verify_input_ids[selected_tree_idx : selected_tree_idx + 1]
         accepted_tokens = selected_verify_input_ids.index_select(1, accepted_index_tensor)
@@ -411,4 +415,5 @@ def pflash_v2_generate(
         stage_times=stage_times,
         round_timestamps=round_timestamps,
         round_trees=round_trees,
+        batch_agreement_metrics=batch_agreement_metrics,
     )

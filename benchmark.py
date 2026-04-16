@@ -43,6 +43,7 @@ def main() -> None:
     parser.add_argument("--pflash-v4-support-bonus-weight", type=float, default=0.70)
     parser.add_argument("--pflash-v4-base-gap-penalty", type=float, default=0.35)
     parser.add_argument("--pflash-v4-graft-score-threshold", type=float, default=1.0)
+    parser.add_argument("--measure-batch-agreement", action="store_true")
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=16384)
@@ -169,6 +170,7 @@ def main() -> None:
                 **common_kwargs,
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
+                measure_batch_agreement=args.measure_batch_agreement,
             )
         if method_key.startswith("pflash_tb"):
             return pflash_generate(
@@ -178,18 +180,21 @@ def main() -> None:
                 branch_prior_weight=args.pflash_branch_prior_weight,
                 merge_prefix_branches=args.pflash_merge_prefix_branches,
                 prefix_support_bonus_weight=args.pflash_prefix_support_bonus_weight,
+                measure_batch_agreement=args.measure_batch_agreement,
             )
         if method_key.startswith("pflash_v2_tb"):
             return pflash_v2_generate(
                 **common_kwargs,
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
+                measure_batch_agreement=args.measure_batch_agreement,
             )
         if method_key.startswith("pflash_v3_tb"):
             return pflash_v3_generate(
                 **common_kwargs,
                 perturbation_temperature=args.pexpress_perturbation_temperature,
                 position_temperature_decay=args.pexpress_position_temperature_decay,
+                measure_batch_agreement=args.measure_batch_agreement,
             )
         if method_key.startswith("pflash_v4_tb"):
             return pflash_v4_generate(
@@ -200,6 +205,7 @@ def main() -> None:
                 support_bonus_weight=args.pflash_v4_support_bonus_weight,
                 base_gap_penalty=args.pflash_v4_base_gap_penalty,
                 graft_score_threshold=args.pflash_v4_graft_score_threshold,
+                measure_batch_agreement=args.measure_batch_agreement,
             )
         if method_key.startswith("ddtree_tb"):
             return ddtree_generate(**common_kwargs)

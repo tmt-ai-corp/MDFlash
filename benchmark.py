@@ -76,6 +76,25 @@ def main() -> None:
     torch.backends.cudnn.benchmark = False
 
     dist.init()
+    visible_cuda_devices = torch.cuda.device_count()
+    if visible_cuda_devices <= 0:
+        raise RuntimeError("No CUDA devices are visible to benchmark.py.")
+    if dist.local_rank() >= visible_cuda_devices:
+        raise RuntimeError(
+            f"LOCAL_RANK={dist.local_rank()} but only {visible_cuda_devices} CUDA device(s) are visible. "
+            "Set NPROC_PER_NODE to the number of visible GPUs."
+        )
+    if dist.size() > visible_cuda_devices and dist.is_main():
+        logger.warning(
+            f"WORLD_SIZE={dist.size()} is larger than visible CUDA device count={visible_cuda_devices}. "
+            "This usually means multiple benchmark workers are sharing GPUs and the run will be slow."
+        )
+    if dist.is_main():
+        logger.info(
+            f"Distributed benchmark config: WORLD_SIZE={dist.size()}, "
+            f"LOCAL_WORLD_SIZE={dist.local_size()}, visible_cuda_devices={visible_cuda_devices}"
+        )
+
     torch.cuda.set_device(dist.local_rank())
     device = torch.device(f"cuda:{dist.local_rank()}")
     maybe_enable_cpp_compact(not args.disable_cpp_compact_cache)

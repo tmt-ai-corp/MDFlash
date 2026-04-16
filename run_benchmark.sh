@@ -2,9 +2,65 @@
 
 set -u
 
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+count_cuda_visible_devices() {
+  local value="$1"
+  if [[ -z "${value}" || "${value}" == "-1" || "${value}" == "NoDevFiles" ]]; then
+    echo 0
+    return
+  fi
 
-NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
+  local count=0
+  local entries=()
+  IFS=',' read -r -a entries <<< "${value}"
+  for entry in "${entries[@]}"; do
+    if [[ -n "${entry}" ]]; then
+      count=$((count + 1))
+    fi
+  done
+  echo "${count}"
+}
+
+detect_physical_gpu_count() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi -L 2>/dev/null | wc -l | tr -d ' '
+    return
+  fi
+  echo 0
+}
+
+build_cuda_visible_devices() {
+  local count="$1"
+  local devices=()
+  for ((device_idx = 0; device_idx < count; device_idx++)); do
+    devices+=("${device_idx}")
+  done
+  local IFS=,
+  echo "${devices[*]}"
+}
+
+if [[ -z "${CUDA_VISIBLE_DEVICES+x}" ]]; then
+  VISIBLE_GPU_COUNT="$(detect_physical_gpu_count)"
+  if [[ "${VISIBLE_GPU_COUNT}" =~ ^[0-9]+$ ]] && (( VISIBLE_GPU_COUNT > 0 )); then
+    export CUDA_VISIBLE_DEVICES="$(build_cuda_visible_devices "${VISIBLE_GPU_COUNT}")"
+  fi
+else
+  VISIBLE_GPU_COUNT="$(count_cuda_visible_devices "${CUDA_VISIBLE_DEVICES}")"
+fi
+
+NPROC_PER_NODE="${NPROC_PER_NODE:-${VISIBLE_GPU_COUNT:-1}}"
+if [[ -z "${NPROC_PER_NODE}" || "${NPROC_PER_NODE}" == "0" ]]; then
+  NPROC_PER_NODE=1
+fi
+if ! [[ "${NPROC_PER_NODE}" =~ ^[0-9]+$ ]]; then
+  echo "NPROC_PER_NODE must be a positive integer, got: ${NPROC_PER_NODE}" >&2
+  exit 1
+fi
+if [[ "${VISIBLE_GPU_COUNT:-0}" =~ ^[0-9]+$ ]] && (( VISIBLE_GPU_COUNT > 0 && NPROC_PER_NODE > VISIBLE_GPU_COUNT )); then
+  echo "NPROC_PER_NODE=${NPROC_PER_NODE} is larger than visible GPU count ${VISIBLE_GPU_COUNT} (CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset})." >&2
+  echo "Set NPROC_PER_NODE=${VISIBLE_GPU_COUNT} or reduce CUDA_VISIBLE_DEVICES to avoid multiple benchmark workers sharing a GPU." >&2
+  exit 1
+fi
+
 MASTER_PORT="${MASTER_PORT:-29600}"
 LOG_DIR="${LOG_DIR:-logs}"
 RUN_DIR="${RUN_DIR:-runs}"
@@ -140,6 +196,7 @@ run_benchmark() {
 
   echo "========================================================"
   echo "Running Benchmark: dataset=${dataset_name} max_samples=${max_samples} model=${model_name} draft=${draft_name} mode=${mode_name}"
+  echo "GPU config: CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset} NPROC_PER_NODE=${NPROC_PER_NODE}"
   echo "========================================================"
 
   if [[ -f "${save_path}" ]]; then

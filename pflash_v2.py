@@ -131,37 +131,29 @@ def follow_verified_forest(
     posterior_logits: torch.Tensor,
     temperature: float,
 ) -> tuple[int, list[int], int]:
-    active_nodes = {tree_idx: 0 for tree_idx in range(len(child_maps_batch))}
-    active_paths = {tree_idx: [0] for tree_idx in range(len(child_maps_batch))}
+    posterior = sample(posterior_logits, temperature)
 
-    while True:
-        representative_tree_idx = min(active_nodes)
-        representative_node_idx = active_nodes[representative_tree_idx]
-        next_token = int(
-            sample(
-                posterior_logits[
-                    representative_tree_idx : representative_tree_idx + 1,
-                    representative_node_idx : representative_node_idx + 1,
-                ],
-                temperature,
-            )[0, 0]
-        )
+    best_tree_idx = 0
+    best_accepted_indices = [0]
+    best_next_token = int(posterior[0, 0])
 
-        next_active_nodes = {}
-        next_active_paths = {}
-        for tree_idx, node_idx in active_nodes.items():
-            child_index = child_maps_batch[tree_idx][node_idx].get(next_token)
-            if child_index is None:
-                continue
-            next_active_nodes[tree_idx] = child_index
-            next_active_paths[tree_idx] = active_paths[tree_idx] + [child_index]
+    for tree_idx, child_maps in enumerate(child_maps_batch):
+        posterior_tokens = posterior[tree_idx].tolist()
+        accepted_indices = [0]
+        current_index = 0
+        next_token = int(posterior_tokens[current_index])
 
-        if not next_active_nodes:
-            selected_tree_idx = min(active_paths)
-            return selected_tree_idx, active_paths[selected_tree_idx], next_token
+        while next_token in child_maps[current_index]:
+            current_index = child_maps[current_index][next_token]
+            accepted_indices.append(current_index)
+            next_token = int(posterior_tokens[current_index])
 
-        active_nodes = next_active_nodes
-        active_paths = next_active_paths
+        if len(accepted_indices) > len(best_accepted_indices):
+            best_tree_idx = tree_idx
+            best_accepted_indices = accepted_indices
+            best_next_token = next_token
+
+    return best_tree_idx, best_accepted_indices, best_next_token
 
 
 @torch.inference_mode()

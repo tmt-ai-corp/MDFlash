@@ -22,18 +22,23 @@ PFLASH_STAGE_ORDER = ("draft", "tree_build", "tree_compile", "verify", "commit")
 
 
 def build_branch_log_priors(
-    branch_scales: torch.Tensor,
+    num_branches: int,
+    perturbation_temperature: float,
     branch_prior_weight: float,
+    device: torch.device,
 ) -> torch.Tensor:
-    if branch_scales.ndim != 1:
-        raise ValueError("branch_scales must be a 1D tensor.")
+    if num_branches <= 0:
+        raise ValueError("num_branches must be positive.")
+    if perturbation_temperature < 0.0:
+        raise ValueError("perturbation_temperature must be non-negative.")
     if branch_prior_weight < 0.0:
         raise ValueError("branch_prior_weight must be non-negative.")
 
-    if branch_scales.numel() <= 1 or branch_prior_weight < 1e-5:
-        return torch.zeros_like(branch_scales, dtype=torch.float32)
+    if num_branches == 1 or perturbation_temperature < 1e-5 or branch_prior_weight < 1e-5:
+        return torch.zeros((num_branches,), device=device, dtype=torch.float32)
 
-    return -(branch_prior_weight * branch_scales.float().square())
+    branch_positions = torch.linspace(0.0, 1.0, steps=num_branches, device=device, dtype=torch.float32)
+    return -(branch_prior_weight * branch_positions.square())
 
 
 def build_pflash_tree(
@@ -434,7 +439,7 @@ def pflash_generate(
 
         draft_stage_start = cuda_time()
         base_noise_embedding = target.model.embed_tokens(block_output_ids)
-        noise_embedding_batch, branch_scales = build_perturbed_noise_embedding_batch(
+        noise_embedding_batch = build_perturbed_noise_embedding_batch(
             base_noise_embedding=base_noise_embedding,
             num_branches=num_branches,
             perturbation_temperature=perturbation_temperature,
@@ -443,8 +448,10 @@ def pflash_generate(
         projected_target_hidden = model.project_target_hidden(target_hidden)
         batched_target_hidden = projected_target_hidden.expand(num_branches, -1, -1)
         branch_log_priors = build_branch_log_priors(
-            branch_scales=branch_scales,
+            num_branches=num_branches,
+            perturbation_temperature=perturbation_temperature,
             branch_prior_weight=branch_prior_weight,
+            device=model.device,
         )
         draft_position_ids = position_ids[
             :,

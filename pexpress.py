@@ -1,4 +1,3 @@
-import math
 from types import SimpleNamespace
 
 import torch
@@ -17,56 +16,12 @@ from ddtree import (
 PEXPRESS_STAGE_ORDER = ("draft", "candidate_sample", "tree_build", "tree_compile", "verify", "commit")
 
 
-def build_nested_branch_relative_scales(
-    num_branches: int,
-    device: torch.device,
-) -> torch.Tensor:
-    if num_branches <= 0:
-        raise ValueError("num_branches must be positive.")
-
-    branch_relative_scales = [0.0]
-    if num_branches > 1:
-        branch_relative_scales.append(0.5)
-    if num_branches > 2:
-        branch_relative_scales.append(1.0)
-
-    level = 2
-    while len(branch_relative_scales) < num_branches:
-        denominator = 2 ** level
-        for odd_index in range(1, denominator, 2):
-            branch_relative_scales.append(odd_index / denominator)
-            if len(branch_relative_scales) == num_branches:
-                break
-        level += 1
-
-    return torch.tensor(branch_relative_scales[:num_branches], device=device, dtype=torch.float32)
-
-
-def build_nested_branch_directions(
-    num_branches: int,
-    hidden_size: int,
-    device: torch.device,
-) -> torch.Tensor:
-    if num_branches <= 0:
-        raise ValueError("num_branches must be positive.")
-
-    branch_indices = torch.arange(1, num_branches + 1, device=device, dtype=torch.float32).unsqueeze(1)
-    feature_indices = torch.arange(1, hidden_size + 1, device=device, dtype=torch.float32).unsqueeze(0)
-    phase = branch_indices * feature_indices
-    branch_directions = torch.sin(phase * 0.7548776662466927) + torch.cos(phase * 0.5698402909980532)
-    branch_directions[0].zero_()
-    branch_norms = torch.linalg.vector_norm(branch_directions, dim=-1, keepdim=True).clamp_min_(1e-6)
-    branch_directions = branch_directions / branch_norms
-    branch_directions[0].zero_()
-    return branch_directions
-
-
 def build_perturbed_noise_embedding_batch(
     base_noise_embedding: torch.Tensor,
     num_branches: int,
     perturbation_temperature: float,
     position_temperature_decay: float = 0.0,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     if num_branches <= 0:
         raise ValueError("num_branches must be positive.")
     if perturbation_temperature < 0.0:
@@ -75,23 +30,19 @@ def build_perturbed_noise_embedding_batch(
         raise ValueError("position_temperature_decay must be non-negative.")
 
     batch_noise_embedding = base_noise_embedding.expand(num_branches, -1, -1).clone()
-    device = batch_noise_embedding.device
     if num_branches == 1 or perturbation_temperature < 1e-5:
-        return batch_noise_embedding, torch.zeros((num_branches,), device=device, dtype=torch.float32)
+        return batch_noise_embedding
 
     _, block_size, hidden_size = batch_noise_embedding.shape
-    anchor_embedding = base_noise_embedding[:, :1, :].float()
-    anchor_rms = torch.linalg.vector_norm(anchor_embedding, dim=-1, keepdim=True) / math.sqrt(hidden_size)
-    branch_directions = build_nested_branch_directions(
-        num_branches=num_branches,
-        hidden_size=hidden_size,
-        device=device,
-    )
-    branch_relative_scales = build_nested_branch_relative_scales(
-        num_branches=num_branches,
-        device=device,
-    )
-    branch_scales = branch_relative_scales * perturbation_temperature
+    device = batch_noise_embedding.device
+
+    branch_directions = torch.randn((num_branches, hidden_size), device=device, dtype=torch.float32)
+    branch_directions[0].zero_()
+    branch_norms = torch.linalg.vector_norm(branch_directions, dim=-1, keepdim=True).clamp_min_(1e-6)
+    branch_directions = branch_directions / branch_norms
+    branch_directions[0].zero_()
+
+    branch_scales = torch.linspace(0.0, perturbation_temperature, steps=num_branches, device=device, dtype=torch.float32)
     if position_temperature_decay == 0.0:
         position_scales = torch.zeros((block_size,), device=device, dtype=torch.float32)
         position_scales[0] = 1.0
@@ -102,11 +53,10 @@ def build_perturbed_noise_embedding_batch(
     perturbation = (
         branch_directions[:, None, :]
         * branch_scales[:, None, None]
-        * anchor_rms
         * position_scales[None, :, None]
     ).to(dtype=batch_noise_embedding.dtype)
     batch_noise_embedding.add_(perturbation)
-    return batch_noise_embedding, branch_scales
+    return batch_noise_embedding
 
 
 def select_candidate_chains_from_batch(
@@ -205,7 +155,7 @@ def pexpress_generate(
 
         draft_stage_start = cuda_time()
         base_noise_embedding = target.model.embed_tokens(block_output_ids)
-        noise_embedding_batch, _ = build_perturbed_noise_embedding_batch(
+        noise_embedding_batch = build_perturbed_noise_embedding_batch(
             base_noise_embedding=base_noise_embedding,
             num_branches=num_branches,
             perturbation_temperature=perturbation_temperature,

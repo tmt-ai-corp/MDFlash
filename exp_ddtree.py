@@ -49,6 +49,27 @@ def summarize_tree_shape(
     }
 
 
+def summarize_logit_drift(
+    single_draft_logits: torch.Tensor,
+    batch0_draft_logits: torch.Tensor,
+) -> dict[str, Any]:
+    single_logits = single_draft_logits.float()
+    batch0_logits = batch0_draft_logits.float()
+    abs_diff = (single_logits - batch0_logits).abs()
+    single_top1 = torch.argmax(single_logits, dim=-1)
+    batch0_top1 = torch.argmax(batch0_logits, dim=-1)
+    top1_matches = single_top1.eq(batch0_top1)
+
+    return {
+        "logit_mean_abs_diff": float(abs_diff.mean().item()),
+        "logit_max_abs_diff": float(abs_diff.max().item()),
+        "top1_match_rate": float(top1_matches.float().mean().item()),
+        "top1_mismatch_count": int((~top1_matches).sum().item()),
+        "top1_all_match": bool(torch.all(top1_matches).item()),
+        "depth_count": int(single_logits.shape[0]),
+    }
+
+
 @torch.inference_mode()
 def exp_ddtree_generate(
     model: DFlashDraftModel,
@@ -250,6 +271,7 @@ def exp_ddtree_generate(
                 "mean_base_alignment": float(sum(agreement_snapshot["base_agreement"]) / len(agreement_snapshot["base_agreement"])),
             }
             exp_metric.update(summarize_tree_shape(node_depths, child_maps))
+            exp_metric.update(summarize_logit_drift(draft_logits[0], alignment_draft_logits[0]))
             exp_ddtree_metrics.append(exp_metric)
 
         acceptance_lengths.append(len(accepted_indices))

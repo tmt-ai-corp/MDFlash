@@ -225,6 +225,10 @@ def summarize_exp_ddtree_metrics(metrics):
     mean_alignment = [float(metric.get("mean_alignment", 0.0)) for metric in metrics]
     max_depth = [float(metric.get("tree_max_depth", 0.0)) for metric in metrics]
     max_width = [float(metric.get("tree_max_width", 0.0)) for metric in metrics]
+    mean_abs_diff = [float(metric.get("logit_mean_abs_diff", 0.0)) for metric in metrics]
+    max_abs_diff = [float(metric.get("logit_max_abs_diff", 0.0)) for metric in metrics]
+    top1_match_rate = [float(metric.get("top1_match_rate", 0.0)) for metric in metrics]
+    rounds_with_top1_drift = sum(0 if metric.get("top1_all_match", False) else 1 for metric in metrics)
 
     return {
         "rounds": len(metrics),
@@ -233,10 +237,15 @@ def summarize_exp_ddtree_metrics(metrics):
         "width_acc_pearson": pearson_correlation(max_width, accepted),
         "align_depth_pearson": pearson_correlation(mean_alignment, max_depth),
         "align_width_pearson": pearson_correlation(mean_alignment, max_width),
+        "drift_acc_pearson": pearson_correlation(mean_abs_diff, accepted),
         "avg_alignment": sum(mean_alignment) / len(mean_alignment) if mean_alignment else None,
         "avg_depth": sum(max_depth) / len(max_depth) if max_depth else None,
         "avg_width": sum(max_width) / len(max_width) if max_width else None,
         "avg_acc": sum(accepted) / len(accepted) if accepted else None,
+        "avg_logit_mean_abs_diff": sum(mean_abs_diff) / len(mean_abs_diff) if mean_abs_diff else None,
+        "avg_logit_max_abs_diff": sum(max_abs_diff) / len(max_abs_diff) if max_abs_diff else None,
+        "avg_top1_match_rate": sum(top1_match_rate) / len(top1_match_rate) if top1_match_rate else None,
+        "rounds_with_top1_drift": int(rounds_with_top1_drift),
     }
 
 
@@ -293,6 +302,34 @@ def print_exp_ddtree_summary(data):
             )
         )
     print("  Pearson r is computed round-wise over accepted draft tokens.")
+
+    print("-" * 120)
+    print("Exp-DDTree single-vs-batch0 draft drift")
+    print(
+        "{:<20} | {:>7} | {:>10} | {:>10} | {:>8} | {:>10} | {:>9}".format(
+            "Method",
+            "Rounds",
+            "MeanAbs",
+            "MaxAbs",
+            "Top1Eq",
+            "DriftRnd",
+            "DriftAcc",
+        )
+    )
+    print("-" * 120)
+    for method, summary in rows:
+        print(
+            "{:<20} | {:>7} | {:>10} | {:>10} | {:>8} | {:>10} | {:>9}".format(
+                method,
+                summary["rounds"],
+                fmt(summary["avg_logit_mean_abs_diff"]),
+                fmt(summary["avg_logit_max_abs_diff"]),
+                fmt(summary["avg_top1_match_rate"]),
+                summary["rounds_with_top1_drift"],
+                fmt(summary["drift_acc_pearson"]),
+            )
+        )
+    print("  MeanAbs/MaxAbs compare the single-branch DDTree draft logits against batch-0 logits from the batched alignment pass.")
 
 
 def print_batch_agreement_summary(data):

@@ -9,6 +9,7 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from benchmark_eval import DEFAULT_EVAL_TIMEOUT_SEC, evaluate_benchmark_run
 import distributed as dist
 from model import DFlashDraftModel, load_and_process_dataset
 from dflash import dflash_generate
@@ -79,6 +80,8 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--flash-attn", action="store_true")
     parser.add_argument("--disable-cpp-compact-cache", action="store_true")
+    parser.add_argument("--eval-mode", action="store_true")
+    parser.add_argument("--eval-timeout-sec", type=float, default=DEFAULT_EVAL_TIMEOUT_SEC)
     parser.add_argument("--save-path", type=str, default=None)
     args = parser.parse_args()
 
@@ -504,6 +507,30 @@ def main() -> None:
         "target_attn_implementation": target_attn_implementation,
         "args": vars(args),
     }
+    if args.eval_mode:
+        logger.info(
+            f"Running eval mode for dataset={args.dataset} across {len(responses)} response(s) with timeout={args.eval_timeout_sec:.1f}s."
+        )
+        eval_results = evaluate_benchmark_run(
+            dataset_name=args.dataset,
+            dataset=dataset,
+            responses=responses,
+            response_metadata=response_metadata,
+            tokenizer=tokenizer,
+            timeout_sec=args.eval_timeout_sec,
+        )
+        run_data["eval_results"] = eval_results
+        if eval_results.get("supported", False):
+            metric_name = str(eval_results.get("metric_name", "score"))
+            method_summaries = eval_results.get("methods", {})
+            preview = ", ".join(
+                f"{method}={method_summary['score']:.3f}"
+                for method, method_summary in method_summaries.items()
+                if method_summary.get("score") is not None
+            )
+            logger.info(f"Eval mode complete ({metric_name}): {preview}")
+        else:
+            logger.warning(str(eval_results.get("message", "Eval mode was enabled but no scorer was available.")))
     
     if args.save_path is not None:
         save_path = Path(args.save_path)

@@ -120,6 +120,8 @@ PFLASH_V11_BUDGET="${PFLASH_V11_BUDGET:-}"
 EXP_DDTREE_BUDGET="${EXP_DDTREE_BUDGET:-}"
 EXP_PREDICTMV="${EXP_PREDICTMV:-0}"
 MEASURE_BATCH_AGREEMENT="${MEASURE_BATCH_AGREEMENT:-0}"
+EVAL_MODE="${EVAL_MODE:-0}"
+EVAL_TIMEOUT_SEC="${EVAL_TIMEOUT_SEC:-5.0}"
 
 PFLASH_EXTRA_BENCHMARK_ARGS=()
 if [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]]; then
@@ -127,6 +129,9 @@ if [[ "${PFLASH_MERGE_PREFIX_BRANCHES}" != "0" ]]; then
 fi
 if [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]]; then
   PFLASH_EXTRA_BENCHMARK_ARGS+=(--measure-batch-agreement)
+fi
+if [[ "${EVAL_MODE}" != "0" ]]; then
+  PFLASH_EXTRA_BENCHMARK_ARGS+=(--eval-mode --eval-timeout-sec "${EVAL_TIMEOUT_SEC}")
 fi
 if [[ -n "${EXP_DDTREE_BUDGET}" ]]; then
   PFLASH_EXTRA_BENCHMARK_ARGS+=(--exp-ddtree-budget "${EXP_DDTREE_BUDGET}")
@@ -214,6 +219,10 @@ build_config_slug() {
   [[ -n "${EXP_DDTREE_BUDGET}" ]] && parts+=("edt${EXP_DDTREE_BUDGET}")
   [[ "${EXP_PREDICTMV}" != "0" ]] && parts+=("epmv${EXP_PREDICTMV}")
   [[ "${MEASURE_BATCH_AGREEMENT}" != "0" ]] && parts+=("ba${MEASURE_BATCH_AGREEMENT}")
+  if [[ "${EVAL_MODE}" != "0" ]]; then
+    parts+=("ev${EVAL_MODE}")
+    [[ "${EVAL_TIMEOUT_SEC}" != "5.0" ]] && parts+=("evt${EVAL_TIMEOUT_SEC}")
+  fi
 
   local IFS="_"
   slugify "${parts[*]}"

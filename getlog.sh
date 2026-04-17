@@ -60,6 +60,7 @@ def load_and_analyze(pt_path):
         "responses": responses,
         "response_metadata": data.get("response_metadata", []),
         "results": dict(results),
+        "eval_results": data.get("eval_results"),
         "args": data.get("args", {}),
         "block_size": data.get("block_size", "N/A"),
         "target_attn": data.get("target_attn_implementation", "N/A"),
@@ -94,6 +95,65 @@ def summarize_method(rows):
         "total_time": total_time,
         "avg_rounds": sum(row["decode_rounds"] for row in rows) / len(rows),
     }
+
+
+def summarize_eval_method(method_summary):
+    if not method_summary:
+        return None
+    return {
+        "metric_name": str(method_summary.get("metric_name", "score")),
+        "score": method_summary.get("score"),
+        "num_correct": int(method_summary.get("num_correct", 0)),
+        "num_total": int(method_summary.get("num_total", 0)),
+        "num_prediction_available": int(method_summary.get("num_prediction_available", 0)),
+        "status_counts": dict(method_summary.get("status_counts", {})),
+    }
+
+
+def print_eval_summary(data):
+    eval_results = data.get("eval_results")
+    if not eval_results:
+        return
+
+    print("-" * 120)
+    print("Evaluation")
+    if not eval_results.get("supported", False):
+        print(f"  {eval_results.get('message', 'Eval mode was enabled, but no evaluation summary is available.')}")
+        return
+
+    metric_name = str(eval_results.get("metric_name", "score"))
+    print(
+        "{:<20} | {:>10} | {:>8} | {:>8} | {:>8} | {:<48}".format(
+            "Method",
+            metric_name[:10],
+            "Correct",
+            "Total",
+            "Pred",
+            "Status Counts",
+        )
+    )
+    print("-" * 120)
+    for method in data["methods"]:
+        method_summary = summarize_eval_method((eval_results.get("methods", {}) or {}).get(method))
+        if method_summary is None:
+            continue
+        score = method_summary["score"]
+        score_str = "N/A" if score is None else f"{100.0 * float(score):.2f}%"
+        status_counts = method_summary["status_counts"]
+        status_str = ", ".join(f"{name}={count}" for name, count in status_counts.items()) or "-"
+        print(
+            "{:<20} | {:>10} | {:>8} | {:>8} | {:>8} | {:<48}".format(
+                method,
+                score_str,
+                method_summary["num_correct"],
+                method_summary["num_total"],
+                method_summary["num_prediction_available"],
+                status_str[:48],
+            )
+        )
+    warnings = eval_results.get("warnings", []) or []
+    for warning in warnings:
+        print(f"  warning: {warning}")
 
 
 def same_tensor(lhs, rhs):
@@ -1088,6 +1148,8 @@ def print_single_result(data, filename):
         "pflash_v6_mid_tree_budget",
         "pflash_v6_low_tree_budget",
         "measure_batch_agreement",
+        "eval_mode",
+        "eval_timeout_sec",
     ):
         print("  {}={}".format(name, args.get(name, "N/A")))
     print("-" * 120)
@@ -1111,6 +1173,7 @@ def print_single_result(data, filename):
             summary["avg_rounds"],
         ))
 
+    print_eval_summary(data)
     print_batch_agreement_summary(data)
     print_exp_ddtree_summary(data)
     print_exp_predictmv_summary(data)
@@ -1184,6 +1247,31 @@ def compare_results(all_data):
         print(row)
 
     print("=" * 140)
+
+    if any((data.get("eval_results") or {}).get("supported", False) for data, _ in all_data):
+        print("\\nEVAL SCORE:")
+        print("-" * 140)
+        header = "{:<50} | ".format("File")
+        for method in all_methods:
+            header += "{:>15} | ".format(method[:15])
+        print(header)
+        print("-" * 140)
+
+        for data, filename in all_data:
+            eval_results = data.get("eval_results") or {}
+            method_summaries = eval_results.get("methods", {}) or {}
+            row = "{:<50} | ".format(filename[:50])
+            for method in all_methods:
+                method_summary = method_summaries.get(method)
+                score = None if method_summary is None else method_summary.get("score")
+                if score is None:
+                    row += "{:>15} | ".format("-")
+                else:
+                    row += "{:>14.3f} | ".format(float(score))
+            print(row)
+
+        print("=" * 140)
+        print("  Eval score is dataset-native: GSM8K uses accuracy, HumanEval/MBPP use pass@1.")
 
 
 dir_path = os.environ["GETLOG_DIR"]

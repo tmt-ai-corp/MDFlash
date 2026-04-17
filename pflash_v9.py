@@ -22,7 +22,7 @@ PFLASH_V9_STAGE_ORDER = ("draft", "tree_build", "tree_compile", "verify", "commi
 
 
 def compile_multiverse_tree_group(
-    root_token_ids: torch.Tensor,
+    root_token_id: int,
     start: int,
     trees: list[SimpleNamespace],
     dtype: torch.dtype,
@@ -31,38 +31,42 @@ def compile_multiverse_tree_group(
     verify_position_ids_buffer: torch.Tensor,
     attention_mask_buffer: torch.Tensor,
     tree_visibility_buffer: torch.Tensor,
-    previous_tree_start: int | None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], int]:
-    max_tree_nodes = int(verify_input_ids_buffer.shape[1])
-
-    if previous_tree_start is not None:
-        attention_mask_buffer[:, 0, :, previous_tree_start : previous_tree_start + max_tree_nodes] = 0
-
-    verify_input_ids_buffer.copy_(root_token_ids[:, None].expand(PFLASH_V9_BATCH_SIZE, max_tree_nodes))
-    verify_position_ids_buffer.fill_(start)
-    tree_visibility_buffer.zero_()
-
-    diag_indices = torch.arange(max_tree_nodes, device=device)
-    tree_visibility_buffer[:, diag_indices, diag_indices] = True
+    previous_tree_start: int,
+    previous_tree_length: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[int], int, int]:
+    if previous_tree_length > 0:
+        attention_mask_buffer[:, 0, :previous_tree_length, previous_tree_start : previous_tree_start + previous_tree_length] = 0
 
     current_lengths = []
+    for tree in trees:
+        current_lengths.append(1 + int(tree.node_token_ids.numel()))
+
+    current_max_length = max(current_lengths, default=1)
+    verify_input_ids = verify_input_ids_buffer[:, :current_max_length]
+    verify_input_ids.fill_(root_token_id)
+    verify_position_ids = verify_position_ids_buffer[:, :current_max_length]
+    verify_position_ids.fill_(start)
+    visibility = tree_visibility_buffer[:, :current_max_length, :current_max_length]
+    visibility.zero_()
+
+    diag_indices = torch.arange(current_max_length, device=device)
+    visibility[:, diag_indices, diag_indices] = True
+
     for batch_idx, tree in enumerate(trees):
-        current_length = 1 + int(tree.node_token_ids.numel())
-        current_lengths.append(current_length)
-
+        current_length = current_lengths[batch_idx]
         if current_length > 1:
-            verify_input_ids_buffer[batch_idx, 1:current_length].copy_(tree.node_token_ids, non_blocking=False)
-            verify_position_ids_buffer[batch_idx, 1:current_length].copy_(tree.node_depths, non_blocking=False)
-            verify_position_ids_buffer[batch_idx, 1:current_length].add_(start)
+            verify_input_ids[batch_idx, 1:current_length].copy_(tree.node_token_ids, non_blocking=False)
+            verify_position_ids[batch_idx, 1:current_length].copy_(tree.node_depths, non_blocking=False)
+            verify_position_ids[batch_idx, 1:current_length].add_(start)
 
-        tree_visibility_buffer[batch_idx, :current_length, :current_length].copy_(tree.visibility_cpu, non_blocking=False)
+        visibility[batch_idx, :current_length, :current_length].copy_(tree.visibility_cpu, non_blocking=False)
 
-    tree_block = attention_mask_buffer[:, 0, :, start : start + max_tree_nodes]
+    tree_block = attention_mask_buffer[:, 0, :current_max_length, start : start + current_max_length]
     tree_block.fill_(torch.finfo(dtype).min)
-    tree_block.masked_fill_(tree_visibility_buffer, 0)
+    tree_block.masked_fill_(visibility, 0)
 
-    attention_mask = attention_mask_buffer[:, :, :, : start + max_tree_nodes]
-    return verify_input_ids_buffer, verify_position_ids_buffer, attention_mask, current_lengths, start
+    attention_mask = attention_mask_buffer[:, :, :current_max_length, : start + current_max_length]
+    return verify_input_ids, verify_position_ids, attention_mask, current_lengths, start, current_max_length
 
 
 def follow_verified_multiverse_forest(
@@ -191,7 +195,8 @@ def pflash_v9_generate(
     batch_agreement_metrics = [] if measure_batch_agreement else None
     pflash_v9_metrics: list[dict[str, Any]] = []
     draft_prefill = True
-    previous_tree_start = None
+    previous_tree_start = 0
+    previous_tree_length = 0
 
     while start < max_length:
         base_root_token = int(output_ids[0, start])
@@ -265,8 +270,9 @@ def pflash_v9_generate(
             verify_attention_mask,
             current_lengths,
             previous_tree_start,
+            previous_tree_length,
         ) = compile_multiverse_tree_group(
-            root_token_ids=anchor_tokens,
+            root_token_id=base_root_token,
             start=start,
             trees=trees,
             dtype=target.dtype,
@@ -276,6 +282,7 @@ def pflash_v9_generate(
             attention_mask_buffer=attention_mask_buffer,
             tree_visibility_buffer=tree_visibility_buffer,
             previous_tree_start=previous_tree_start,
+            previous_tree_length=previous_tree_length,
         )
         stage_times["tree_compile"] += cuda_time() - tree_compile_start
 

@@ -156,8 +156,8 @@ def pflash_v7_generate(
         )
 
         draft_stage_start = cuda_time()
-        # Experimental multiverse rollout: branch 0 keeps the committed anchor
-        # token, while the remaining branches swap in alternate top-k anchors.
+        # Hotfix: alternate anchors only diversify the draft proposal. The
+        # committed root token at position T remains fixed during verify.
         branch_block_output_ids = verify_input_ids_buffer
         branch_block_output_ids.fill_(mask_token_id)
         branch_block_output_ids[:, 0].copy_(anchor_tokens)
@@ -192,6 +192,7 @@ def pflash_v7_generate(
 
         sample_stage_start = cuda_time()
         candidate_token_ids = torch.argmax(draft_logits, dim=-1)
+        branch_block_output_ids[:, 0].fill_(base_root_token)
         if draft_horizon > 0:
             branch_block_output_ids[:, 1:] = candidate_token_ids
         verify_position_ids = verify_position_ids_buffer[:, :block_size]

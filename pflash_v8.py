@@ -18,7 +18,7 @@ PFLASH_V8_STAGE_ORDER = ("draft", "tree_build", "tree_compile", "verify", "commi
 
 
 def compile_shared_tree_forest(
-    root_token_ids: torch.Tensor,
+    root_token_id: int,
     start: int,
     node_token_ids: torch.Tensor,
     node_depths: torch.Tensor,
@@ -29,35 +29,41 @@ def compile_shared_tree_forest(
     verify_position_ids_buffer: torch.Tensor,
     attention_mask_buffer: torch.Tensor,
     tree_visibility_buffer: torch.Tensor,
-    previous_tree_start: int | None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    previous_tree_start: int,
+    previous_tree_length: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
     batch_size, max_tree_nodes = verify_input_ids_buffer.shape
     current_length = 1 + int(node_token_ids.numel())
 
-    if previous_tree_start is not None:
-        attention_mask_buffer[:, 0, :, previous_tree_start : previous_tree_start + max_tree_nodes] = 0
+    if previous_tree_length > 0:
+        attention_mask_buffer[:, 0, :previous_tree_length, previous_tree_start : previous_tree_start + previous_tree_length] = 0
 
-    verify_input_ids_buffer.copy_(root_token_ids[:, None].expand(batch_size, max_tree_nodes))
-    verify_position_ids_buffer.fill_(start)
+    verify_input_ids = verify_input_ids_buffer[:, :current_length]
+    verify_input_ids[:, 0].fill_(root_token_id)
     if current_length > 1:
-        verify_input_ids_buffer[:, 1:current_length].copy_(node_token_ids.unsqueeze(0).expand(batch_size, -1), non_blocking=False)
-        verify_position_ids_buffer[:, 1:current_length].copy_(node_depths.unsqueeze(0).expand(batch_size, -1), non_blocking=False)
-        verify_position_ids_buffer[:, 1:current_length].add_(start)
+        verify_input_ids[:, 1:current_length].copy_(node_token_ids.unsqueeze(0).expand(batch_size, -1), non_blocking=False)
 
-    tree_visibility_buffer.zero_()
-    diag_indices = torch.arange(max_tree_nodes, device=device)
-    tree_visibility_buffer[:, diag_indices, diag_indices] = True
-    tree_visibility_buffer[:, :current_length, :current_length].copy_(
+    verify_position_ids = verify_position_ids_buffer[:, :current_length]
+    verify_position_ids[:, 0].fill_(start)
+    if current_length > 1:
+        verify_position_ids[:, 1:current_length].copy_(node_depths.unsqueeze(0).expand(batch_size, -1), non_blocking=False)
+        verify_position_ids[:, 1:current_length].add_(start)
+
+    visibility = tree_visibility_buffer[:, :current_length, :current_length]
+    visibility.zero_()
+    diag_indices = torch.arange(current_length, device=device)
+    visibility[:, diag_indices, diag_indices] = True
+    visibility.copy_(
         visibility_cpu.to(device=device, dtype=torch.bool).unsqueeze(0).expand(batch_size, -1, -1),
         non_blocking=False,
     )
 
-    tree_block = attention_mask_buffer[:, 0, :, start : start + max_tree_nodes]
+    tree_block = attention_mask_buffer[:, 0, :current_length, start : start + current_length]
     tree_block.fill_(torch.finfo(dtype).min)
-    tree_block.masked_fill_(tree_visibility_buffer, 0)
+    tree_block.masked_fill_(visibility, 0)
 
-    attention_mask = attention_mask_buffer[:, :, :, : start + max_tree_nodes]
-    return verify_input_ids_buffer, verify_position_ids_buffer, attention_mask, start
+    attention_mask = attention_mask_buffer[:, :, :current_length, : start + current_length]
+    return verify_input_ids, verify_position_ids, attention_mask, start, current_length
 
 
 def follow_verified_shared_tree_forest(
@@ -187,7 +193,8 @@ def pflash_v8_generate(
     batch_agreement_metrics = [] if measure_batch_agreement else None
     pflash_v8_metrics: list[dict[str, Any]] = []
     draft_prefill = True
-    previous_tree_start = None
+    previous_tree_start = 0
+    previous_tree_length = 0
 
     while start < max_length:
         base_root_token = int(output_ids[0, start])
@@ -251,8 +258,8 @@ def pflash_v8_generate(
             stage_times[stage_name] += stage_elapsed
 
         tree_compile_start = cuda_time()
-        verify_input_ids, verify_position_ids, verify_attention_mask, previous_tree_start = compile_shared_tree_forest(
-            root_token_ids=anchor_tokens,
+        verify_input_ids, verify_position_ids, verify_attention_mask, previous_tree_start, previous_tree_length = compile_shared_tree_forest(
+            root_token_id=base_root_token,
             start=start,
             node_token_ids=node_token_ids,
             node_depths=node_depths,
@@ -264,6 +271,7 @@ def pflash_v8_generate(
             attention_mask_buffer=attention_mask_buffer,
             tree_visibility_buffer=tree_visibility_buffer,
             previous_tree_start=previous_tree_start,
+            previous_tree_length=previous_tree_length,
         )
         stage_times["tree_compile"] += cuda_time() - tree_compile_start
 

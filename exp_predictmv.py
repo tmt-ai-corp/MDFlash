@@ -339,7 +339,6 @@ def exp_predictmv_generate(
 
         sample_stage_start = cuda_time()
         candidate_token_ids = torch.argmax(draft_logits, dim=-1)
-        branch_block_output_ids[:, 0].fill_(base_root_token)
         if draft_horizon > 0:
             branch_block_output_ids[:, 1:] = candidate_token_ids
         verify_position_ids = verify_position_ids_buffer[:, :block_size]

@@ -206,7 +206,9 @@ def pflash_v10_generate(
                 stage_times[stage_name] += stage_elapsed
         stage_times["tree_build"] += cuda_time() - tree_build_start
 
-        selected_branch_idx, branch_tree_depths = select_deepest_tree_branch(trees)
+        branch_tree_depths = [tree_max_depth(tree.node_depths) for tree in trees]
+        # Keep the committed path exact-safe by routing through the base branch.
+        selected_branch_idx = 0
         selected_tree = trees[selected_branch_idx]
 
         tree_compile_start = cuda_time()

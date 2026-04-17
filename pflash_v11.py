@@ -200,11 +200,8 @@ def pflash_v11_generate(
             stage_times["draft"] += draft_stage_elapsed
 
         branch_confidence_scores, branch_first_margin_scores, branch_mean_logprob_scores = compute_branch_confidence_scores(draft_logits)
-        selected_branch_idx, selected_confidence = select_confident_branch(
-            confidence_scores=branch_confidence_scores,
-            first_step_scores=branch_first_margin_scores,
-            mean_logprob_scores=branch_mean_logprob_scores,
-        )
+        selected_branch_idx = 0
+        selected_confidence = float(branch_confidence_scores[selected_branch_idx])
         selected_anchor_token = int(anchor_tokens[selected_branch_idx].item())
 
         tree_build_start = cuda_time()

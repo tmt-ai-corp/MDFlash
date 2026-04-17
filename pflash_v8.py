@@ -67,9 +67,8 @@ def follow_verified_shared_tree_forest(
 ) -> tuple[int, list[int], int, list[int]]:
     posterior = sample(posterior_logits, temperature)
 
-    best_branch_idx = 0
-    best_accepted_indices = [0]
-    best_next_token = int(posterior[0, 0])
+    base_accepted_indices = [0]
+    base_next_token = int(posterior[0, 0])
     branch_acceptance_lengths = []
 
     for branch_idx in range(posterior.shape[0]):
@@ -78,12 +77,11 @@ def follow_verified_shared_tree_forest(
             posterior=posterior[branch_idx : branch_idx + 1],
         )
         branch_acceptance_lengths.append(int(len(accepted_indices)))
-        if len(accepted_indices) > len(best_accepted_indices):
-            best_branch_idx = branch_idx
-            best_accepted_indices = accepted_indices
-            best_next_token = next_token
+        if branch_idx == 0:
+            base_accepted_indices = accepted_indices
+            base_next_token = next_token
 
-    return best_branch_idx, best_accepted_indices, best_next_token, branch_acceptance_lengths
+    return 0, base_accepted_indices, base_next_token, branch_acceptance_lengths
 
 
 @torch.inference_mode()

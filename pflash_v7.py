@@ -68,6 +68,27 @@ def select_best_linear_branch(
     return best_branch_idx, accepted_indices, next_token, branch_acceptance_lengths
 
 
+def select_exact_linear_branch(
+    verify_input_ids: torch.Tensor,
+    posterior: torch.Tensor,
+) -> tuple[int, list[int], int, list[int]]:
+    branch_acceptance_lengths = []
+
+    for branch_idx in range(verify_input_ids.shape[0]):
+        accepted_draft_tokens = int(
+            (verify_input_ids[branch_idx : branch_idx + 1, 1:] == posterior[branch_idx : branch_idx + 1, :-1])
+            .cumprod(dim=1)
+            .sum(dim=1)[0]
+            .item()
+        )
+        branch_acceptance_lengths.append(1 + accepted_draft_tokens)
+
+    accepted_length = int(branch_acceptance_lengths[0]) if branch_acceptance_lengths else 1
+    accepted_indices = list(range(accepted_length))
+    next_token = int(posterior[0, accepted_length - 1])
+    return 0, accepted_indices, next_token, branch_acceptance_lengths
+
+
 @torch.inference_mode()
 def pflash_v7_generate(
     model: DFlashDraftModel,
@@ -214,7 +235,7 @@ def pflash_v7_generate(
 
         commit_stage_start = cuda_time()
         posterior = sample(output.logits, temperature)
-        selected_branch_idx, accepted_indices, next_token, branch_acceptance_lengths = select_best_linear_branch(
+        selected_branch_idx, accepted_indices, next_token, branch_acceptance_lengths = select_exact_linear_branch(
             verify_input_ids=branch_block_output_ids,
             posterior=posterior,
         )

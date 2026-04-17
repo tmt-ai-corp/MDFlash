@@ -24,6 +24,7 @@ from pflash_v6 import pflash_v6_generate
 from pflash_v7 import pflash_v7_generate
 from pflash_v8 import pflash_v8_generate
 from pflash_v9 import pflash_v9_generate
+from pflash_v10 import pflash_v10_generate
 from exp_ddtree import exp_ddtree_generate
 from exp_predictmv import exp_predictmv_generate
 
@@ -46,6 +47,7 @@ def main() -> None:
     parser.add_argument("--pflash-v7-budget", type=str, default=None)
     parser.add_argument("--pflash-v8-budget", type=str, default=None)
     parser.add_argument("--pflash-v9-budget", type=str, default=None)
+    parser.add_argument("--pflash-v10-budget", type=str, default=None)
     parser.add_argument("--exp-ddtree-budget", type=str, default=None)
     parser.add_argument("--exp-predictmv", action="store_true")
     parser.add_argument("--pexpress-perturbation-temperature", type=float, default=0.75)
@@ -124,7 +126,7 @@ def main() -> None:
     draft_attn_implementation = "flash_attention_2"
 
     if not args.flash_attn and installed_flash_attn:
-        logger.warning("DDTree, Exp-DDTree, MDFlash, P-Express, P-Flash, P-Flash V2, P-Flash V3, P-Flash V4, P-Flash V5, P-Flash V6, P-Flash V8, and P-Flash V9 use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
+        logger.warning("DDTree, Exp-DDTree, MDFlash, P-Express, P-Flash, P-Flash V2, P-Flash V3, P-Flash V4, P-Flash V5, P-Flash V6, P-Flash V8, P-Flash V9, and P-Flash V10 use a custom tree attention mask on the target model. For compatibility, forcing the target verifier to torch.sdpa.")
 
     target = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
@@ -152,6 +154,7 @@ def main() -> None:
     pflash_v7_budgets = [] if args.pflash_v7_budget is None else [int(tree_budget) for tree_budget in args.pflash_v7_budget.split(",")]
     pflash_v8_budgets = [] if args.pflash_v8_budget is None else [int(tree_budget) for tree_budget in args.pflash_v8_budget.split(",")]
     pflash_v9_budgets = [] if args.pflash_v9_budget is None else [int(tree_budget) for tree_budget in args.pflash_v9_budget.split(",")]
+    pflash_v10_budgets = [] if args.pflash_v10_budget is None else [int(tree_budget) for tree_budget in args.pflash_v10_budget.split(",")]
     exp_ddtree_budgets = [] if args.exp_ddtree_budget is None else [int(tree_budget) for tree_budget in args.exp_ddtree_budget.split(",")]
     methods_to_run = ["dflash"]
     method_key_to_tree_budget = {}
@@ -167,6 +170,7 @@ def main() -> None:
         pflash_v7_method_keys = [f"pflash_v7_tb{tree_budget}" for tree_budget in pflash_v7_budgets]
         pflash_v8_method_keys = [f"pflash_v8_tb{tree_budget}" for tree_budget in pflash_v8_budgets]
         pflash_v9_method_keys = [f"pflash_v9_tb{tree_budget}" for tree_budget in pflash_v9_budgets]
+        pflash_v10_method_keys = [f"pflash_v10_tb{tree_budget}" for tree_budget in pflash_v10_budgets]
         exp_ddtree_method_keys = [f"exp_ddtree_tb{tree_budget}" for tree_budget in exp_ddtree_budgets]
         exp_predictmv_method_keys = ["exp_predictmv"] if args.exp_predictmv else []
         ddtree_method_keys = [f"ddtree_tb{tree_budget}" for tree_budget in tree_budgets]
@@ -181,6 +185,7 @@ def main() -> None:
         methods_to_run.extend(pflash_v7_method_keys)
         methods_to_run.extend(pflash_v8_method_keys)
         methods_to_run.extend(pflash_v9_method_keys)
+        methods_to_run.extend(pflash_v10_method_keys)
         methods_to_run.extend(exp_ddtree_method_keys)
         methods_to_run.extend(exp_predictmv_method_keys)
         methods_to_run.extend(ddtree_method_keys)
@@ -195,6 +200,7 @@ def main() -> None:
         method_key_to_tree_budget.update({f"pflash_v7_tb{tree_budget}": tree_budget for tree_budget in pflash_v7_budgets})
         method_key_to_tree_budget.update({f"pflash_v8_tb{tree_budget}": tree_budget for tree_budget in pflash_v8_budgets})
         method_key_to_tree_budget.update({f"pflash_v9_tb{tree_budget}": tree_budget for tree_budget in pflash_v9_budgets})
+        method_key_to_tree_budget.update({f"pflash_v10_tb{tree_budget}": tree_budget for tree_budget in pflash_v10_budgets})
         method_key_to_tree_budget.update({f"exp_ddtree_tb{tree_budget}": tree_budget for tree_budget in exp_ddtree_budgets})
         method_key_to_tree_budget["exp_predictmv"] = 0
         method_key_to_tree_budget.update({f"ddtree_tb{tree_budget}": tree_budget for tree_budget in tree_budgets})
@@ -210,6 +216,7 @@ def main() -> None:
         pflash_v7_method_keys = []
         pflash_v8_method_keys = []
         pflash_v9_method_keys = []
+        pflash_v10_method_keys = []
         exp_ddtree_method_keys = []
         exp_predictmv_method_keys = []
         ddtree_method_keys = []
@@ -327,6 +334,11 @@ def main() -> None:
                 **common_kwargs,
                 measure_batch_agreement=args.measure_batch_agreement,
             )
+        if method_key.startswith("pflash_v10_tb"):
+            return pflash_v10_generate(
+                **common_kwargs,
+                measure_batch_agreement=args.measure_batch_agreement,
+            )
         if method_key.startswith("exp_ddtree_tb"):
             return exp_ddtree_generate(
                 **common_kwargs,
@@ -358,6 +370,8 @@ def main() -> None:
         history_method_key = pflash_v5_method_keys[-1]
     elif pflash_v6_method_keys:
         history_method_key = pflash_v6_method_keys[-1]
+    elif pflash_v10_method_keys:
+        history_method_key = pflash_v10_method_keys[-1]
     elif pflash_v9_method_keys:
         history_method_key = pflash_v9_method_keys[-1]
     elif pflash_v8_method_keys:
